@@ -1000,6 +1000,22 @@
       min-height: 46vh;
     }
 
+    .story-grid.four-up .story-content {
+      padding: 20px;
+    }
+
+    .story-grid.four-up .story-content h3 {
+      font-size: clamp(19px, 2.3vw, 30px);
+      line-height: 1.1;
+      overflow-wrap: break-word;
+      hyphens: auto;
+    }
+
+    .story-grid.four-up .story-content p {
+      font-size: 13.5px;
+      line-height: 1.5;
+    }
+
     .story-card {
       min-height: 62vh;
       border-radius: 8px;
@@ -1416,6 +1432,7 @@
       .sacred-grid,
       .philosophy,
       .story-grid,
+      .story-grid.four-up,
       .temple-wall {
         grid-template-columns: 1fr;
       }
@@ -1423,6 +1440,10 @@
       .feature-image,
       .story-card {
         min-height: 430px;
+      }
+
+      .story-grid.four-up .story-card {
+        min-height: 320px;
       }
 
       .hero-metrics {
@@ -1939,7 +1960,7 @@
           <article class="story-card">
             <img src="https://commons.wikimedia.org/wiki/Special:FilePath/Raja%20Ravi%20Varma%20-%20Sankaracharya.jpg?width=1200" alt="Adi Shankaracharya with his disciples, painting by Raja Ravi Varma">
             <div class="story-content">
-              <h2>Adi Shankaracharya</h2>
+              <h3>Adi Shankaracharya</h3>
               <p>In a single lifetime, organized the four cardinal mathas and gave scattered devotion a philosophical spine: Advaita, the oneness of self and the absolute.</p>
             </div>
           </article>
@@ -2278,17 +2299,14 @@
     const blessingToast = document.getElementById("blessingToast");
     const activeMode = document.getElementById("activeMode");
     const breathCue = document.getElementById("breathCue");
+    // Only these two modes have a genuine, rights-clear recording. Every other mode
+    // relies purely on the synthesized Om drone below — no recording is substituted for them.
     const chantAudioSources = {
-      sanatan: "https://commons.wikimedia.org/wiki/Special:FilePath/Mrityunjaya.ogg",
-      shiva: "https://commons.wikimedia.org/wiki/Special:FilePath/Mrityunjaya.ogg",
-      devi: "https://commons.wikimedia.org/wiki/Special:FilePath/Mrityunjaya.ogg",
-      vishnu: "https://commons.wikimedia.org/wiki/Special:FilePath/Mrityunjaya.ogg",
-      shanti: "https://commons.wikimedia.org/wiki/Special:FilePath/Mrityunjaya.ogg",
-      universal: "https://commons.wikimedia.org/wiki/Special:FilePath/Mrityunjaya.ogg",
       gayatri: "https://commons.wikimedia.org/wiki/Special:FilePath/Gayatri_mantra.ogg",
       mrityunjaya: "https://commons.wikimedia.org/wiki/Special:FilePath/Mrityunjaya.ogg"
     };
-    let loadedAudioSrc = chantAudioSources.sanatan;
+    const hasRecording = (mode) => Object.prototype.hasOwnProperty.call(chantAudioSources, mode);
+    let loadedAudioSrc = null;
     const chantModes = {
       sanatan: {
         label: "Sanatan",
@@ -2403,6 +2421,7 @@
     };
 
     const syncAudioSourceToMode = () => {
+      if (!hasRecording(currentMode)) return false;
       const nextSrc = chantAudioSources[currentMode];
       if (nextSrc === loadedAudioSrc) return false;
       audio.src = nextSrc;
@@ -2456,34 +2475,63 @@
       audioContext = new (window.AudioContext || window.webkitAudioContext)();
       droneGain = audioContext.createGain();
       droneGain.gain.value = 0;
+
+      const warmthFilter = audioContext.createBiquadFilter();
+      warmthFilter.type = "lowpass";
+      warmthFilter.frequency.value = 680;
+      warmthFilter.Q.value = 0.5;
+      warmthFilter.connect(droneGain);
       droneGain.connect(audioContext.destination);
 
-      chantModes[currentMode].drone.forEach((frequency, index) => {
-        const oscillator = audioContext.createOscillator();
-        const gain = audioContext.createGain();
-        const filter = audioContext.createBiquadFilter();
+      const frequencies = chantModes[currentMode].drone;
 
-        oscillator.type = index === 1 ? "triangle" : "sine";
-        oscillator.frequency.value = frequency;
-        gain.gain.value = index === 0 ? 0.038 : 0.018;
-        filter.type = "lowpass";
-        filter.frequency.value = 520;
+      // Sub-bass layer, an octave below the fundamental, for weight and body.
+      const subOsc = audioContext.createOscillator();
+      const subGain = audioContext.createGain();
+      subOsc.type = "sine";
+      subOsc.frequency.value = frequencies[0] / 2;
+      subGain.gain.value = 0.05;
+      subOsc.connect(subGain);
+      subGain.connect(warmthFilter);
+      subOsc.start();
+      droneNodes.push({ oscillator: subOsc, gain: subGain, freqIndex: 0, multiplier: 0.5 });
 
-        oscillator.connect(gain);
-        gain.connect(filter);
-        filter.connect(droneGain);
-        oscillator.start();
-        droneNodes.push({ oscillator, gain, filter });
+      // Each partial gets a detuned pair (a soft chorus) instead of a single flat tone.
+      frequencies.forEach((frequency, index) => {
+        [-3, 3].forEach((detune) => {
+          const oscillator = audioContext.createOscillator();
+          const gain = audioContext.createGain();
+          oscillator.type = index === 1 ? "triangle" : "sine";
+          oscillator.frequency.value = frequency;
+          oscillator.detune.value = detune;
+          gain.gain.value = index === 0 ? 0.03 : 0.016;
+          oscillator.connect(gain);
+          gain.connect(warmthFilter);
+          oscillator.start();
+          droneNodes.push({ oscillator, gain, freqIndex: index, multiplier: 1 });
+        });
       });
+
+      // A slow LFO breathes the filter open and closed so the drone feels alive, not static.
+      const lfo = audioContext.createOscillator();
+      const lfoGain = audioContext.createGain();
+      lfo.frequency.value = 0.045;
+      lfoGain.gain.value = 110;
+      lfo.connect(lfoGain);
+      lfoGain.connect(warmthFilter.frequency);
+      lfo.start();
+      droneNodes.push({ oscillator: lfo, gain: lfoGain, isLfo: true });
     };
 
     const retuneDrone = () => {
       if (!audioContext) return;
       const now = audioContext.currentTime;
       const frequencies = chantModes[currentMode].drone;
-      droneNodes.forEach(({ oscillator }, index) => {
-        oscillator.frequency.cancelScheduledValues(now);
-        oscillator.frequency.setTargetAtTime(frequencies[index], now, 1.1);
+      droneNodes.forEach((node) => {
+        if (node.isLfo || node.freqIndex === undefined) return;
+        const target = frequencies[node.freqIndex] * node.multiplier;
+        node.oscillator.frequency.cancelScheduledValues(now);
+        node.oscillator.frequency.setTargetAtTime(target, now, 1.1);
       });
     };
 
@@ -2535,15 +2583,18 @@
     };
 
     toggle.addEventListener("click", async () => {
-      if (audio.paused) {
+      const isChanting = document.body.classList.contains("chanting");
+      if (!isChanting) {
         try {
-          syncAudioSourceToMode();
           createDrone();
           await audioContext.resume();
-          audio.volume = 0;
-          await audio.play();
-          fadeAudio(preferredVolume(), 1200);
           setDroneActive(true);
+          if (hasRecording(currentMode)) {
+            syncAudioSourceToMode();
+            audio.volume = 0;
+            await audio.play();
+            fadeAudio(preferredVolume(), 1200);
+          }
           document.body.classList.add("chanting");
           startMantraRotation();
           startBellCycle();
@@ -2576,7 +2627,7 @@
       droneEnabled = !droneEnabled;
       droneToggle.textContent = droneEnabled ? "Drone On" : "Drone Off";
       droneToggle.setAttribute("aria-pressed", String(droneEnabled));
-      setDroneActive(droneEnabled && !audio.paused);
+      setDroneActive(droneEnabled && document.body.classList.contains("chanting"));
     });
 
     modeButtons.forEach((button) => {
@@ -2595,19 +2646,30 @@
         retuneDrone();
 
         const isChanting = document.body.classList.contains("chanting");
-        const audioChanged = chantAudioSources[currentMode] !== loadedAudioSrc;
+        const newHasRecording = hasRecording(currentMode);
+        const nextSrc = newHasRecording ? chantAudioSources[currentMode] : null;
+        const audioChanged = nextSrc !== loadedAudioSrc;
 
         if (isChanting && audioChanged) {
           fadeAudio(0, 500);
           setTimeout(() => {
-            syncAudioSourceToMode();
-            audio.volume = 0;
-            audio.play()
-              .then(() => fadeAudio(preferredVolume(), 900))
-              .catch(() => { toggle.textContent = "Audio Blocked"; });
+            if (newHasRecording) {
+              syncAudioSourceToMode();
+              audio.volume = 0;
+              audio.play()
+                .then(() => fadeAudio(preferredVolume(), 900))
+                .catch(() => { toggle.textContent = "Audio Blocked"; });
+            } else {
+              audio.pause();
+              loadedAudioSrc = null;
+            }
           }, 520);
         } else if (!isChanting) {
-          syncAudioSourceToMode();
+          if (newHasRecording) {
+            syncAudioSourceToMode();
+          } else {
+            loadedAudioSrc = null;
+          }
         }
 
         if (isChanting) {
