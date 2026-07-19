@@ -2175,22 +2175,169 @@
         bellFilter.connect(bellGain);
         bellGain.connect(ctx.destination);
 
-        const omGain = ctx.createGain();
-        omGain.gain.setValueAtTime(0.0001, now + 0.3);
-        omGain.gain.exponentialRampToValueAtTime(0.09, now + 1.4);
-        omGain.gain.exponentialRampToValueAtTime(0.0001, now + 4.4);
-        [68, 136, 204].forEach((freq, i) => {
-          const osc = ctx.createOscillator();
-          const voiceGain = ctx.createGain();
-          osc.type = i === 0 ? "sine" : "triangle";
-          osc.frequency.value = freq;
-          voiceGain.gain.value = i === 0 ? 1 : 0.4;
-          osc.connect(voiceGain);
-          voiceGain.connect(omGain);
-          osc.start(now + 0.3);
-          osc.stop(now + 4.4);
-        });
-        omGain.connect(ctx.destination);
+// Core AUM synthesis: parallel bandpass formant filters morphing "A" -> "U" -> "M".
+AumSynthesizer.prototype.playAumChant = function () {
+  if (!this.ctx || !this.masterGain || !this.reverbGain) return;
+  var ctx = this.ctx;
+  var start = ctx.currentTime;
+  var duration = this.config.chantDuration;
+  var f0 = this.config.fundamentalFreq;
+
+  var vocalGain = ctx.createGain();
+  vocalGain.gain.setValueAtTime(0, start);
+  vocalGain.gain.linearRampToValueAtTime(this.config.vocalVolume * 0.85, start + 0.35);
+  vocalGain.gain.setValueAtTime(this.config.vocalVolume * 0.85, start + duration * 0.7);
+  vocalGain.gain.exponentialRampToValueAtTime(0.001, start + duration);
+
+  vocalGain.connect(this.masterGain);
+  vocalGain.connect(this.reverbGain);
+
+  var osc1 = ctx.createOscillator();
+  var osc2 = ctx.createOscillator();
+  var osc3 = ctx.createOscillator();
+  var subOsc = ctx.createOscillator();
+
+  osc1.type = 'sawtooth';
+  osc1.frequency.setValueAtTime(f0, start);
+
+  osc2.type = 'triangle';
+  osc2.frequency.setValueAtTime(f0 * 1.003, start);
+
+  osc3.type = 'triangle';
+  osc3.frequency.setValueAtTime(f0 * 0.997, start);
+
+  subOsc.type = 'sine';
+  subOsc.frequency.setValueAtTime(f0 * 0.5, start);
+
+  if (this.config.binauralBeat) {
+    var pannerLeft = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+    var pannerRight = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+
+    var binauralBeatFreq = 5.0;
+    osc2.frequency.setValueAtTime(f0 + binauralBeatFreq / 2, start);
+    osc3.frequency.setValueAtTime(f0 - binauralBeatFreq / 2, start);
+
+    if (pannerLeft && pannerRight) {
+      pannerLeft.pan.setValueAtTime(-1.0, start);
+      pannerRight.pan.setValueAtTime(1.0, start);
+
+      osc2.connect(pannerLeft);
+      pannerLeft.connect(vocalGain);
+
+      osc3.connect(pannerRight);
+      pannerRight.connect(vocalGain);
+    }
+  }
+
+  var sourceGain = ctx.createGain();
+  var subGain = ctx.createGain();
+
+  var warmthScale = this.config.warmth;
+  sourceGain.gain.setValueAtTime(0.65, start);
+  subGain.gain.setValueAtTime(0.12 * warmthScale, start);
+
+  var vibratoLFO = ctx.createOscillator();
+  var vibratoAmp = ctx.createGain();
+
+  vibratoLFO.type = 'sine';
+  vibratoLFO.frequency.setValueAtTime(4.8, start);
+  vibratoAmp.gain.setValueAtTime(1.8, start);
+
+  vibratoLFO.connect(vibratoAmp);
+  vibratoAmp.connect(osc1.frequency);
+  vibratoAmp.connect(osc2.frequency);
+  vibratoAmp.connect(osc3.frequency);
+
+  osc1.connect(sourceGain);
+  if (!this.config.binauralBeat) {
+    osc2.connect(sourceGain);
+    osc3.connect(sourceGain);
+  }
+  subOsc.connect(subGain);
+
+  var filter1 = ctx.createBiquadFilter();
+  var filter2 = ctx.createBiquadFilter();
+  var lowpass = ctx.createBiquadFilter();
+
+  filter1.type = 'bandpass';
+  filter2.type = 'bandpass';
+  lowpass.type = 'lowpass';
+
+  var formMix1 = ctx.createGain();
+  var formMix2 = ctx.createGain();
+
+  sourceGain.connect(filter1);
+  sourceGain.connect(filter2);
+  subGain.connect(lowpass);
+
+  filter1.connect(formMix1);
+  filter2.connect(formMix2);
+
+  formMix1.connect(lowpass);
+  formMix2.connect(lowpass);
+
+  lowpass.connect(vocalGain);
+
+  // "A" (Ah): Open mouth, bright, chest resonance
+  filter1.frequency.setValueAtTime(650, start);
+  filter1.Q.setValueAtTime(5.5, start);
+  formMix1.gain.setValueAtTime(0.85, start);
+
+  filter2.frequency.setValueAtTime(1100, start);
+  filter2.Q.setValueAtTime(4.5, start);
+  formMix2.gain.setValueAtTime(0.6, start);
+
+  lowpass.frequency.setValueAtTime(1600, start);
+  lowpass.Q.setValueAtTime(1.0, start);
+
+  // "A" -> "U" (Oo): mouth rounds, darker
+  var tU = start + duration * 0.35;
+  filter1.frequency.exponentialRampToValueAtTime(380, tU);
+  filter1.Q.linearRampToValueAtTime(4.0, tU);
+  formMix1.gain.linearRampToValueAtTime(0.75, tU);
+
+  filter2.frequency.exponentialRampToValueAtTime(850, tU);
+  filter2.Q.linearRampToValueAtTime(3.5, tU);
+  formMix2.gain.linearRampToValueAtTime(0.4, tU);
+
+  lowpass.frequency.exponentialRampToValueAtTime(700, tU);
+
+  // "U" -> "M" (Mm): closed mouth, nasal buzz
+  var tM = start + duration * 0.70;
+  filter1.frequency.exponentialRampToValueAtTime(255, tM);
+  filter1.Q.linearRampToValueAtTime(8.5, tM);
+  formMix1.gain.linearRampToValueAtTime(0.95, tM);
+
+  filter2.frequency.exponentialRampToValueAtTime(1550, tM);
+  filter2.Q.linearRampToValueAtTime(9.0, tM);
+  formMix2.gain.linearRampToValueAtTime(0.25, tM);
+
+  lowpass.frequency.exponentialRampToValueAtTime(320, tM);
+
+  var tEnd = start + duration;
+  filter1.frequency.exponentialRampToValueAtTime(230, tEnd);
+  filter2.frequency.exponentialRampToValueAtTime(1400, tEnd);
+  lowpass.frequency.exponentialRampToValueAtTime(220, tEnd);
+
+  osc1.start(start);
+  osc2.start(start);
+  osc3.start(start);
+  subOsc.start(start);
+  vibratoLFO.start(start);
+
+  osc1.stop(tEnd);
+  osc2.stop(tEnd);
+  osc3.stop(tEnd);
+  subOsc.stop(tEnd);
+  vibratoLFO.stop(tEnd);
+
+  this.activeChantNodes = [
+    osc1, osc2, osc3, subOsc, vibratoLFO,
+    sourceGain, subGain, vocalGain,
+    filter1, filter2, lowpass,
+    formMix1, formMix2, vibratoAmp
+  ];
+};
 
         setTimeout(() => ctx.close(), 5000);
       } catch (error) {
@@ -2418,7 +2565,11 @@
     };
 
     const toggleBreathCue = () => {
-      breathCue.textContent = breathCue.textContent === "Inhale" ? "Exhale" : "Inhale";
+      const next = breathCue.textContent === "Inhale" ? "Exhale" : "Inhale";
+      breathCue.textContent = next;
+      if (next === "Exhale") {
+        playVocalAum(3.3);
+      }
     };
 
     const syncAudioSourceToMode = () => {
@@ -2444,6 +2595,7 @@
       clearInterval(mantraTimer);
       clearInterval(breathTimer);
       clearTimeout(blessingTimer);
+      stopVocalAum();
       if (blessingToast) blessingToast.classList.remove("is-active");
       breathCue.textContent = "Inhale";
       chantLine.innerHTML = `
@@ -2540,7 +2692,7 @@
       if (!audioContext || !droneGain) return;
       const now = audioContext.currentTime;
       droneGain.gain.cancelScheduledValues(now);
-      droneGain.gain.setTargetAtTime(active && droneEnabled ? 0.58 : 0, now, 0.8);
+      droneGain.gain.setTargetAtTime(active && droneEnabled ? 0.4 : 0, now, 0.8);
     };
 
     const playBell = () => {
@@ -2581,6 +2733,180 @@
 
     const stopBellCycle = () => {
       clearInterval(bellTimer);
+    };
+
+    // ---- Vocal Aum synthesis --------------------------------------------------
+    // Ported from the Aum Resonance instrument: a chanted "A -> U -> M" voice built
+    // from parallel bandpass formant filters over detuned oscillators, rather than
+    // a flat drone tone. This is now the default sound of the chant -- the pad
+    // drone above stays on as ambient support underneath it, not as the lead voice.
+    let vocalGainMaster = null;
+    let vocalReverbSend = null;
+    let activeVocalNodes = [];
+
+    const setupVocalBus = () => {
+      if (!audioContext || vocalGainMaster) return;
+
+      vocalGainMaster = audioContext.createGain();
+      vocalGainMaster.gain.value = 1;
+      vocalGainMaster.connect(audioContext.destination);
+
+      vocalReverbSend = audioContext.createGain();
+      vocalReverbSend.gain.value = 0.5;
+
+      const delayL = audioContext.createDelay(2.0);
+      const delayR = audioContext.createDelay(2.0);
+      const fbL = audioContext.createGain();
+      const fbR = audioContext.createGain();
+      const revFilterL = audioContext.createBiquadFilter();
+      const revFilterR = audioContext.createBiquadFilter();
+
+      delayL.delayTime.value = 0.75;
+      delayR.delayTime.value = 1.15;
+      fbL.gain.value = 0.5;
+      fbR.gain.value = 0.5;
+      revFilterL.type = "lowpass";
+      revFilterL.frequency.value = 550;
+      revFilterR.type = "lowpass";
+      revFilterR.frequency.value = 550;
+
+      vocalReverbSend.connect(delayL);
+      delayL.connect(revFilterL);
+      revFilterL.connect(audioContext.destination);
+      revFilterL.connect(fbL);
+      fbL.connect(delayR);
+
+      vocalReverbSend.connect(delayR);
+      delayR.connect(revFilterR);
+      revFilterR.connect(audioContext.destination);
+      revFilterR.connect(fbR);
+      fbR.connect(delayL);
+    };
+
+    const stopVocalAum = () => {
+      activeVocalNodes.forEach((node) => {
+        try { node.stop(); } catch (error) {}
+      });
+      activeVocalNodes = [];
+    };
+
+    const playVocalAum = (durationSeconds) => {
+      if (!audioContext) return;
+      setupVocalBus();
+
+      const ctx = audioContext;
+      const start = ctx.currentTime;
+      const duration = durationSeconds;
+      const f0 = chantModes[currentMode].drone[0];
+
+      const vocalGain = ctx.createGain();
+      vocalGain.gain.setValueAtTime(0, start);
+      vocalGain.gain.linearRampToValueAtTime(0.85, start + 0.35);
+      vocalGain.gain.setValueAtTime(0.85, start + duration * 0.7);
+      vocalGain.gain.exponentialRampToValueAtTime(0.001, start + duration);
+      vocalGain.connect(vocalGainMaster);
+      vocalGain.connect(vocalReverbSend);
+
+      const osc1 = ctx.createOscillator();
+      const osc2 = ctx.createOscillator();
+      const osc3 = ctx.createOscillator();
+      const subOsc = ctx.createOscillator();
+
+      osc1.type = "sawtooth";
+      osc1.frequency.setValueAtTime(f0, start);
+      osc2.type = "triangle";
+      osc2.frequency.setValueAtTime(f0 * 1.003, start);
+      osc3.type = "triangle";
+      osc3.frequency.setValueAtTime(f0 * 0.997, start);
+      subOsc.type = "sine";
+      subOsc.frequency.setValueAtTime(f0 * 0.5, start);
+
+      const sourceGain = ctx.createGain();
+      const subGain = ctx.createGain();
+      sourceGain.gain.setValueAtTime(0.65, start);
+      subGain.gain.setValueAtTime(0.1, start);
+
+      const vibratoLFO = ctx.createOscillator();
+      const vibratoAmp = ctx.createGain();
+      vibratoLFO.type = "sine";
+      vibratoLFO.frequency.setValueAtTime(4.8, start);
+      vibratoAmp.gain.setValueAtTime(1.8, start);
+      vibratoLFO.connect(vibratoAmp);
+      vibratoAmp.connect(osc1.frequency);
+      vibratoAmp.connect(osc2.frequency);
+      vibratoAmp.connect(osc3.frequency);
+
+      osc1.connect(sourceGain);
+      osc2.connect(sourceGain);
+      osc3.connect(sourceGain);
+      subOsc.connect(subGain);
+
+      const filter1 = ctx.createBiquadFilter();
+      const filter2 = ctx.createBiquadFilter();
+      const lowpass = ctx.createBiquadFilter();
+      filter1.type = "bandpass";
+      filter2.type = "bandpass";
+      lowpass.type = "lowpass";
+
+      const formMix1 = ctx.createGain();
+      const formMix2 = ctx.createGain();
+
+      sourceGain.connect(filter1);
+      sourceGain.connect(filter2);
+      subGain.connect(lowpass);
+      filter1.connect(formMix1);
+      filter2.connect(formMix2);
+      formMix1.connect(lowpass);
+      formMix2.connect(lowpass);
+      lowpass.connect(vocalGain);
+
+      // "A" (Ah): open mouth, bright, chest resonance
+      filter1.frequency.setValueAtTime(650, start);
+      filter1.Q.setValueAtTime(5.5, start);
+      formMix1.gain.setValueAtTime(0.85, start);
+      filter2.frequency.setValueAtTime(1100, start);
+      filter2.Q.setValueAtTime(4.5, start);
+      formMix2.gain.setValueAtTime(0.6, start);
+      lowpass.frequency.setValueAtTime(1600, start);
+      lowpass.Q.setValueAtTime(1.0, start);
+
+      // "A" -> "U" (Oo): mouth rounds, darker
+      const tU = start + duration * 0.35;
+      filter1.frequency.exponentialRampToValueAtTime(380, tU);
+      filter1.Q.linearRampToValueAtTime(4.0, tU);
+      formMix1.gain.linearRampToValueAtTime(0.75, tU);
+      filter2.frequency.exponentialRampToValueAtTime(850, tU);
+      filter2.Q.linearRampToValueAtTime(3.5, tU);
+      formMix2.gain.linearRampToValueAtTime(0.4, tU);
+      lowpass.frequency.exponentialRampToValueAtTime(700, tU);
+
+      // "U" -> "M" (Mm): closed mouth, nasal buzz
+      const tM = start + duration * 0.70;
+      filter1.frequency.exponentialRampToValueAtTime(255, tM);
+      filter1.Q.linearRampToValueAtTime(8.5, tM);
+      formMix1.gain.linearRampToValueAtTime(0.95, tM);
+      filter2.frequency.exponentialRampToValueAtTime(1550, tM);
+      filter2.Q.linearRampToValueAtTime(9.0, tM);
+      formMix2.gain.linearRampToValueAtTime(0.25, tM);
+      lowpass.frequency.exponentialRampToValueAtTime(320, tM);
+
+      const tEnd = start + duration;
+      filter1.frequency.exponentialRampToValueAtTime(230, tEnd);
+      filter2.frequency.exponentialRampToValueAtTime(1400, tEnd);
+      lowpass.frequency.exponentialRampToValueAtTime(220, tEnd);
+
+      osc1.start(start);
+      osc2.start(start);
+      osc3.start(start);
+      subOsc.start(start);
+      vibratoLFO.start(start);
+      osc1.stop(tEnd);
+      osc2.stop(tEnd);
+      osc3.stop(tEnd);
+      subOsc.stop(tEnd);
+      vibratoLFO.stop(tEnd);
+
+      activeVocalNodes = [osc1, osc2, osc3, subOsc, vibratoLFO];
     };
 
     toggle.addEventListener("click", async () => {
