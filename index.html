@@ -2175,169 +2175,22 @@
         bellFilter.connect(bellGain);
         bellGain.connect(ctx.destination);
 
-// Core AUM synthesis: parallel bandpass formant filters morphing "A" -> "U" -> "M".
-AumSynthesizer.prototype.playAumChant = function () {
-  if (!this.ctx || !this.masterGain || !this.reverbGain) return;
-  var ctx = this.ctx;
-  var start = ctx.currentTime;
-  var duration = this.config.chantDuration;
-  var f0 = this.config.fundamentalFreq;
-
-  var vocalGain = ctx.createGain();
-  vocalGain.gain.setValueAtTime(0, start);
-  vocalGain.gain.linearRampToValueAtTime(this.config.vocalVolume * 0.85, start + 0.35);
-  vocalGain.gain.setValueAtTime(this.config.vocalVolume * 0.85, start + duration * 0.7);
-  vocalGain.gain.exponentialRampToValueAtTime(0.001, start + duration);
-
-  vocalGain.connect(this.masterGain);
-  vocalGain.connect(this.reverbGain);
-
-  var osc1 = ctx.createOscillator();
-  var osc2 = ctx.createOscillator();
-  var osc3 = ctx.createOscillator();
-  var subOsc = ctx.createOscillator();
-
-  osc1.type = 'sawtooth';
-  osc1.frequency.setValueAtTime(f0, start);
-
-  osc2.type = 'triangle';
-  osc2.frequency.setValueAtTime(f0 * 1.003, start);
-
-  osc3.type = 'triangle';
-  osc3.frequency.setValueAtTime(f0 * 0.997, start);
-
-  subOsc.type = 'sine';
-  subOsc.frequency.setValueAtTime(f0 * 0.5, start);
-
-  if (this.config.binauralBeat) {
-    var pannerLeft = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
-    var pannerRight = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
-
-    var binauralBeatFreq = 5.0;
-    osc2.frequency.setValueAtTime(f0 + binauralBeatFreq / 2, start);
-    osc3.frequency.setValueAtTime(f0 - binauralBeatFreq / 2, start);
-
-    if (pannerLeft && pannerRight) {
-      pannerLeft.pan.setValueAtTime(-1.0, start);
-      pannerRight.pan.setValueAtTime(1.0, start);
-
-      osc2.connect(pannerLeft);
-      pannerLeft.connect(vocalGain);
-
-      osc3.connect(pannerRight);
-      pannerRight.connect(vocalGain);
-    }
-  }
-
-  var sourceGain = ctx.createGain();
-  var subGain = ctx.createGain();
-
-  var warmthScale = this.config.warmth;
-  sourceGain.gain.setValueAtTime(0.65, start);
-  subGain.gain.setValueAtTime(0.12 * warmthScale, start);
-
-  var vibratoLFO = ctx.createOscillator();
-  var vibratoAmp = ctx.createGain();
-
-  vibratoLFO.type = 'sine';
-  vibratoLFO.frequency.setValueAtTime(4.8, start);
-  vibratoAmp.gain.setValueAtTime(1.8, start);
-
-  vibratoLFO.connect(vibratoAmp);
-  vibratoAmp.connect(osc1.frequency);
-  vibratoAmp.connect(osc2.frequency);
-  vibratoAmp.connect(osc3.frequency);
-
-  osc1.connect(sourceGain);
-  if (!this.config.binauralBeat) {
-    osc2.connect(sourceGain);
-    osc3.connect(sourceGain);
-  }
-  subOsc.connect(subGain);
-
-  var filter1 = ctx.createBiquadFilter();
-  var filter2 = ctx.createBiquadFilter();
-  var lowpass = ctx.createBiquadFilter();
-
-  filter1.type = 'bandpass';
-  filter2.type = 'bandpass';
-  lowpass.type = 'lowpass';
-
-  var formMix1 = ctx.createGain();
-  var formMix2 = ctx.createGain();
-
-  sourceGain.connect(filter1);
-  sourceGain.connect(filter2);
-  subGain.connect(lowpass);
-
-  filter1.connect(formMix1);
-  filter2.connect(formMix2);
-
-  formMix1.connect(lowpass);
-  formMix2.connect(lowpass);
-
-  lowpass.connect(vocalGain);
-
-  // "A" (Ah): Open mouth, bright, chest resonance
-  filter1.frequency.setValueAtTime(650, start);
-  filter1.Q.setValueAtTime(5.5, start);
-  formMix1.gain.setValueAtTime(0.85, start);
-
-  filter2.frequency.setValueAtTime(1100, start);
-  filter2.Q.setValueAtTime(4.5, start);
-  formMix2.gain.setValueAtTime(0.6, start);
-
-  lowpass.frequency.setValueAtTime(1600, start);
-  lowpass.Q.setValueAtTime(1.0, start);
-
-  // "A" -> "U" (Oo): mouth rounds, darker
-  var tU = start + duration * 0.35;
-  filter1.frequency.exponentialRampToValueAtTime(380, tU);
-  filter1.Q.linearRampToValueAtTime(4.0, tU);
-  formMix1.gain.linearRampToValueAtTime(0.75, tU);
-
-  filter2.frequency.exponentialRampToValueAtTime(850, tU);
-  filter2.Q.linearRampToValueAtTime(3.5, tU);
-  formMix2.gain.linearRampToValueAtTime(0.4, tU);
-
-  lowpass.frequency.exponentialRampToValueAtTime(700, tU);
-
-  // "U" -> "M" (Mm): closed mouth, nasal buzz
-  var tM = start + duration * 0.70;
-  filter1.frequency.exponentialRampToValueAtTime(255, tM);
-  filter1.Q.linearRampToValueAtTime(8.5, tM);
-  formMix1.gain.linearRampToValueAtTime(0.95, tM);
-
-  filter2.frequency.exponentialRampToValueAtTime(1550, tM);
-  filter2.Q.linearRampToValueAtTime(9.0, tM);
-  formMix2.gain.linearRampToValueAtTime(0.25, tM);
-
-  lowpass.frequency.exponentialRampToValueAtTime(320, tM);
-
-  var tEnd = start + duration;
-  filter1.frequency.exponentialRampToValueAtTime(230, tEnd);
-  filter2.frequency.exponentialRampToValueAtTime(1400, tEnd);
-  lowpass.frequency.exponentialRampToValueAtTime(220, tEnd);
-
-  osc1.start(start);
-  osc2.start(start);
-  osc3.start(start);
-  subOsc.start(start);
-  vibratoLFO.start(start);
-
-  osc1.stop(tEnd);
-  osc2.stop(tEnd);
-  osc3.stop(tEnd);
-  subOsc.stop(tEnd);
-  vibratoLFO.stop(tEnd);
-
-  this.activeChantNodes = [
-    osc1, osc2, osc3, subOsc, vibratoLFO,
-    sourceGain, subGain, vocalGain,
-    filter1, filter2, lowpass,
-    formMix1, formMix2, vibratoAmp
-  ];
-};
+        const omGain = ctx.createGain();
+        omGain.gain.setValueAtTime(0.0001, now + 0.3);
+        omGain.gain.exponentialRampToValueAtTime(0.09, now + 1.4);
+        omGain.gain.exponentialRampToValueAtTime(0.0001, now + 4.4);
+        [68, 136, 204].forEach((freq, i) => {
+          const osc = ctx.createOscillator();
+          const voiceGain = ctx.createGain();
+          osc.type = i === 0 ? "sine" : "triangle";
+          osc.frequency.value = freq;
+          voiceGain.gain.value = i === 0 ? 1 : 0.4;
+          osc.connect(voiceGain);
+          voiceGain.connect(omGain);
+          osc.start(now + 0.3);
+          osc.stop(now + 4.4);
+        });
+        omGain.connect(ctx.destination);
 
         setTimeout(() => ctx.close(), 5000);
       } catch (error) {
@@ -2514,8 +2367,8 @@ AumSynthesizer.prototype.playAumChant = function () {
       }
     };
     let audioContext;
-    let droneGain;
-    let droneNodes = [];
+    let aum;          // AumSynthesizer instance (bowl drone + formant AUM chant)
+    let aumGain;      // controllable output gain for the Aum layer
     let droneEnabled = true;
     let mantraTimer;
     let bellTimer;
@@ -2565,11 +2418,7 @@ AumSynthesizer.prototype.playAumChant = function () {
     };
 
     const toggleBreathCue = () => {
-      const next = breathCue.textContent === "Inhale" ? "Exhale" : "Inhale";
-      breathCue.textContent = next;
-      if (next === "Exhale") {
-        playVocalAum(3.3);
-      }
+      breathCue.textContent = breathCue.textContent === "Inhale" ? "Exhale" : "Inhale";
     };
 
     const syncAudioSourceToMode = () => {
@@ -2595,7 +2444,6 @@ AumSynthesizer.prototype.playAumChant = function () {
       clearInterval(mantraTimer);
       clearInterval(breathTimer);
       clearTimeout(blessingTimer);
-      stopVocalAum();
       if (blessingToast) blessingToast.classList.remove("is-active");
       breathCue.textContent = "Inhale";
       chantLine.innerHTML = `
@@ -2622,77 +2470,429 @@ AumSynthesizer.prototype.playAumChant = function () {
       fadeFrame = requestAnimationFrame(step);
     };
 
-    const createDrone = () => {
+    /* ============================================================
+       AumSynthesizer -- DSP engine (bowl drone + formant AUM chant).
+       This is the exact synthesis engine used by the standalone Aum
+       page: singing-bowl partials, a temple reverb, and a formant-
+       filtered AUM chant that morphs A -> U -> M on an inhale / hold
+       / exhale-chant / resting cycle. Only the wiring at init() (it
+       now shares this page's audioContext and routes into a
+       controllable output gain instead of straight to destination)
+       and setFundamental() (so it can retune per chant mode) were
+       added to make it live inside this page. The DSP itself is
+       untouched.
+       ============================================================ */
+    function AumSynthesizer(cfg) {
+      this.ctx = null;
+      this.outputNode = null;
+      this.masterGain = null;
+      this.reverbGain = null;
+      this.bowlGain = null;
+      this.bowlOscillators = [];
+      this.lfoNodes = [];
+      this.activeChantNodes = [];
+      this.config = cfg;
+      this.state = 'idle';
+      this.runTimer = null;
+      this.stateDuration = 0;
+      this.stateStartTime = 0;
+    }
+
+    AumSynthesizer.prototype.init = function (ctx, outputNode) {
+      var self = this;
+      if (this.ctx) return Promise.resolve();
+
+      this.ctx = ctx;
+      this.outputNode = outputNode;
+
+      var afterResume = function () {
+        var ctx = self.ctx;
+
+        self.masterGain = ctx.createGain();
+        self.masterGain.gain.setValueAtTime(1.0, ctx.currentTime);
+
+        self.reverbGain = ctx.createGain();
+        self.reverbGain.gain.setValueAtTime(self.config.reverbMix, ctx.currentTime);
+
+        var delayL = ctx.createDelay(2.0);
+        var delayR = ctx.createDelay(2.0);
+        var fbL = ctx.createGain();
+        var fbR = ctx.createGain();
+        var filterL = ctx.createBiquadFilter();
+        var filterR = ctx.createBiquadFilter();
+        var panL = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+        var panR = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+
+        delayL.delayTime.setValueAtTime(0.75, ctx.currentTime);
+        delayR.delayTime.setValueAtTime(1.15, ctx.currentTime);
+
+        fbL.gain.setValueAtTime(0.55, ctx.currentTime);
+        fbR.gain.setValueAtTime(0.55, ctx.currentTime);
+
+        filterL.type = 'lowpass';
+        filterL.frequency.setValueAtTime(600, ctx.currentTime);
+        filterR.type = 'lowpass';
+        filterR.frequency.setValueAtTime(600, ctx.currentTime);
+
+        if (panL && panR) {
+          panL.pan.setValueAtTime(-0.8, ctx.currentTime);
+          panR.pan.setValueAtTime(0.8, ctx.currentTime);
+        }
+
+        self.reverbGain.connect(delayL);
+        delayL.connect(filterL);
+        if (panL) {
+          filterL.connect(panL);
+          panL.connect(self.outputNode);
+        } else {
+          filterL.connect(self.outputNode);
+        }
+        filterL.connect(fbL);
+        fbL.connect(delayR);
+
+        self.reverbGain.connect(delayR);
+        delayR.connect(filterR);
+        if (panR) {
+          filterR.connect(panR);
+          panR.connect(self.outputNode);
+        } else {
+          filterR.connect(self.outputNode);
+        }
+        filterR.connect(fbR);
+        fbR.connect(delayL);
+
+        self.masterGain.connect(self.outputNode);
+
+        self.initSingingBowl();
+      };
+
+      if (this.ctx.state === 'suspended') {
+        return this.ctx.resume().then(afterResume);
+      }
+      afterResume();
+      return Promise.resolve();
+    };
+
+    AumSynthesizer.prototype.initSingingBowl = function () {
+      if (!this.ctx || !this.masterGain) return;
+      var ctx = this.ctx;
+      var self = this;
+
+      this.bowlGain = ctx.createGain();
+      this.bowlGain.gain.setValueAtTime(this.config.singingBowlVolume, ctx.currentTime);
+      this.bowlGain.connect(this.masterGain);
+      this.bowlGain.connect(this.reverbGain);
+
+      var f = this.config.fundamentalFreq;
+      var partials = [
+        { ratio: 2.0, amp: 0.25, lfoSpeed: 0.12, pan: -0.4 },
+        { ratio: 3.01, amp: 0.15, lfoSpeed: 0.08, pan: 0.4 },
+        { ratio: 4.44, amp: 0.08, lfoSpeed: 0.18, pan: -0.6 },
+        { ratio: 5.98, amp: 0.04, lfoSpeed: 0.24, pan: 0.6 }
+      ];
+
+      partials.forEach(function (part) {
+        var osc = ctx.createOscillator();
+        var pGain = ctx.createGain();
+        var pPan = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(f * part.ratio, ctx.currentTime);
+        pGain.gain.setValueAtTime(part.amp, ctx.currentTime);
+
+        var lfo = ctx.createOscillator();
+        var lfoGain = ctx.createGain();
+        lfo.type = 'sine';
+        lfo.frequency.setValueAtTime(part.lfoSpeed, ctx.currentTime);
+        lfoGain.gain.setValueAtTime(part.amp * 0.4, ctx.currentTime);
+
+        lfo.connect(lfoGain);
+        lfoGain.connect(pGain.gain);
+
+        if (pPan) {
+          pPan.pan.setValueAtTime(part.pan, ctx.currentTime);
+          osc.connect(pGain);
+          pGain.connect(pPan);
+          pPan.connect(self.bowlGain);
+        } else {
+          osc.connect(pGain);
+          pGain.connect(self.bowlGain);
+        }
+
+        osc.start();
+        lfo.start();
+
+        self.bowlOscillators.push({ osc: osc, gain: pGain, ratio: part.ratio });
+        self.lfoNodes.push(lfo);
+      });
+    };
+
+    // Retunes the bowl partials and the fundamental used by the next chant
+    // cycle. Needed because this page has several chant modes, each with
+    // its own base frequency, whereas the standalone Aum page only ever
+    // used one fixed fundamental.
+    AumSynthesizer.prototype.setFundamental = function (freq) {
+      this.config.fundamentalFreq = freq;
+      if (!this.ctx) return;
+      var now = this.ctx.currentTime;
+      this.bowlOscillators.forEach(function (item) {
+        item.osc.frequency.cancelScheduledValues(now);
+        item.osc.frequency.setTargetAtTime(freq * item.ratio, now, 1.2);
+      });
+    };
+
+    AumSynthesizer.prototype.start = function () {
+      if (this.runTimer) return;
+      this.state = 'idle';
+      this.transitionToNextState();
+
+      var self = this;
+      var tickInterval = 100;
+      this.runTimer = window.setInterval(function () {
+        if (!self.ctx) return;
+        var now = self.ctx.currentTime;
+        var elapsed = now - self.stateStartTime;
+        if (elapsed >= self.stateDuration) {
+          self.transitionToNextState();
+        }
+      }, tickInterval);
+    };
+
+    AumSynthesizer.prototype.transitionToNextState = function () {
+      if (!this.ctx) return;
+
+      var previousState = this.state;
+      var nextState = 'inhale';
+
+      switch (previousState) {
+        case 'idle':
+          nextState = 'inhale';
+          this.stateDuration = this.config.inhaleDuration;
+          break;
+        case 'inhale':
+          if (this.config.holdDuration > 0) {
+            nextState = 'hold';
+            this.stateDuration = this.config.holdDuration;
+          } else {
+            nextState = 'exhale-chant';
+            this.stateDuration = this.config.chantDuration;
+          }
+          break;
+        case 'hold':
+          nextState = 'exhale-chant';
+          this.stateDuration = this.config.chantDuration;
+          break;
+        case 'exhale-chant':
+          nextState = 'resting';
+          this.stateDuration = 2.0;
+          break;
+        case 'resting':
+          nextState = 'inhale';
+          this.stateDuration = this.config.inhaleDuration;
+          break;
+      }
+
+      this.state = nextState;
+      this.stateStartTime = this.ctx.currentTime;
+
+      if (nextState === 'exhale-chant') {
+        this.playAumChant();
+      } else {
+        this.stopActiveChant();
+      }
+    };
+
+    AumSynthesizer.prototype.stopActiveChant = function () {
+      this.activeChantNodes.forEach(function (node) {
+        try {
+          if (node instanceof OscillatorNode) {
+            node.stop();
+          }
+        } catch (e) {}
+      });
+      this.activeChantNodes = [];
+    };
+
+    // Core AUM synthesis: parallel bandpass formant filters morphing "A" -> "U" -> "M".
+    AumSynthesizer.prototype.playAumChant = function () {
+      if (!this.ctx || !this.masterGain || !this.reverbGain) return;
+      var ctx = this.ctx;
+      var start = ctx.currentTime;
+      var duration = this.config.chantDuration;
+      var f0 = this.config.fundamentalFreq;
+
+      var vocalGain = ctx.createGain();
+      vocalGain.gain.setValueAtTime(0, start);
+      vocalGain.gain.linearRampToValueAtTime(this.config.vocalVolume * 0.85, start + 0.35);
+      vocalGain.gain.setValueAtTime(this.config.vocalVolume * 0.85, start + duration * 0.7);
+      vocalGain.gain.exponentialRampToValueAtTime(0.001, start + duration);
+
+      vocalGain.connect(this.masterGain);
+      vocalGain.connect(this.reverbGain);
+
+      var osc1 = ctx.createOscillator();
+      var osc2 = ctx.createOscillator();
+      var osc3 = ctx.createOscillator();
+      var subOsc = ctx.createOscillator();
+
+      osc1.type = 'sawtooth';
+      osc1.frequency.setValueAtTime(f0, start);
+
+      osc2.type = 'triangle';
+      osc2.frequency.setValueAtTime(f0 * 1.003, start);
+
+      osc3.type = 'triangle';
+      osc3.frequency.setValueAtTime(f0 * 0.997, start);
+
+      subOsc.type = 'sine';
+      subOsc.frequency.setValueAtTime(f0 * 0.5, start);
+
+      var sourceGain = ctx.createGain();
+      var subGain = ctx.createGain();
+
+      var warmthScale = this.config.warmth;
+      sourceGain.gain.setValueAtTime(0.65, start);
+      subGain.gain.setValueAtTime(0.12 * warmthScale, start);
+
+      var vibratoLFO = ctx.createOscillator();
+      var vibratoAmp = ctx.createGain();
+
+      vibratoLFO.type = 'sine';
+      vibratoLFO.frequency.setValueAtTime(4.8, start);
+      vibratoAmp.gain.setValueAtTime(1.8, start);
+
+      vibratoLFO.connect(vibratoAmp);
+      vibratoAmp.connect(osc1.frequency);
+      vibratoAmp.connect(osc2.frequency);
+      vibratoAmp.connect(osc3.frequency);
+
+      osc1.connect(sourceGain);
+      osc2.connect(sourceGain);
+      osc3.connect(sourceGain);
+      subOsc.connect(subGain);
+
+      var filter1 = ctx.createBiquadFilter();
+      var filter2 = ctx.createBiquadFilter();
+      var lowpass = ctx.createBiquadFilter();
+
+      filter1.type = 'bandpass';
+      filter2.type = 'bandpass';
+      lowpass.type = 'lowpass';
+
+      var formMix1 = ctx.createGain();
+      var formMix2 = ctx.createGain();
+
+      sourceGain.connect(filter1);
+      sourceGain.connect(filter2);
+      subGain.connect(lowpass);
+
+      filter1.connect(formMix1);
+      filter2.connect(formMix2);
+
+      formMix1.connect(lowpass);
+      formMix2.connect(lowpass);
+
+      lowpass.connect(vocalGain);
+
+      // "A" (Ah): Open mouth, bright, chest resonance
+      filter1.frequency.setValueAtTime(650, start);
+      filter1.Q.setValueAtTime(5.5, start);
+      formMix1.gain.setValueAtTime(0.85, start);
+
+      filter2.frequency.setValueAtTime(1100, start);
+      filter2.Q.setValueAtTime(4.5, start);
+      formMix2.gain.setValueAtTime(0.6, start);
+
+      lowpass.frequency.setValueAtTime(1600, start);
+      lowpass.Q.setValueAtTime(1.0, start);
+
+      // "A" -> "U" (Oo): mouth rounds, darker
+      var tU = start + duration * 0.35;
+      filter1.frequency.exponentialRampToValueAtTime(380, tU);
+      filter1.Q.linearRampToValueAtTime(4.0, tU);
+      formMix1.gain.linearRampToValueAtTime(0.75, tU);
+
+      filter2.frequency.exponentialRampToValueAtTime(850, tU);
+      filter2.Q.linearRampToValueAtTime(3.5, tU);
+      formMix2.gain.linearRampToValueAtTime(0.4, tU);
+
+      lowpass.frequency.exponentialRampToValueAtTime(700, tU);
+
+      // "U" -> "M" (Mm): closed mouth, nasal buzz
+      var tM = start + duration * 0.70;
+      filter1.frequency.exponentialRampToValueAtTime(255, tM);
+      filter1.Q.linearRampToValueAtTime(8.5, tM);
+      formMix1.gain.linearRampToValueAtTime(0.95, tM);
+
+      filter2.frequency.exponentialRampToValueAtTime(1550, tM);
+      filter2.Q.linearRampToValueAtTime(9.0, tM);
+      formMix2.gain.linearRampToValueAtTime(0.25, tM);
+
+      lowpass.frequency.exponentialRampToValueAtTime(320, tM);
+
+      var tEnd = start + duration;
+      filter1.frequency.exponentialRampToValueAtTime(230, tEnd);
+      filter2.frequency.exponentialRampToValueAtTime(1400, tEnd);
+      lowpass.frequency.exponentialRampToValueAtTime(220, tEnd);
+
+      osc1.start(start);
+      osc2.start(start);
+      osc3.start(start);
+      subOsc.start(start);
+      vibratoLFO.start(start);
+
+      osc1.stop(tEnd);
+      osc2.stop(tEnd);
+      osc3.stop(tEnd);
+      subOsc.stop(tEnd);
+      vibratoLFO.stop(tEnd);
+
+      this.activeChantNodes = [
+        osc1, osc2, osc3, subOsc, vibratoLFO,
+        sourceGain, subGain, vocalGain,
+        filter1, filter2, lowpass,
+        formMix1, formMix2, vibratoAmp
+      ];
+    };
+
+    const createAum = () => {
       if (audioContext) return;
 
       audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      droneGain = audioContext.createGain();
-      droneGain.gain.value = 0;
 
-      const warmthFilter = audioContext.createBiquadFilter();
-      warmthFilter.type = "lowpass";
-      warmthFilter.frequency.value = 680;
-      warmthFilter.Q.value = 0.5;
-      warmthFilter.connect(droneGain);
-      droneGain.connect(audioContext.destination);
+      aumGain = audioContext.createGain();
+      aumGain.gain.value = 0;
+      aumGain.connect(audioContext.destination);
 
-      const frequencies = chantModes[currentMode].drone;
-
-      // Sub-bass layer, an octave below the fundamental, for weight and body.
-      const subOsc = audioContext.createOscillator();
-      const subGain = audioContext.createGain();
-      subOsc.type = "sine";
-      subOsc.frequency.value = frequencies[0] / 2;
-      subGain.gain.value = 0.05;
-      subOsc.connect(subGain);
-      subGain.connect(warmthFilter);
-      subOsc.start();
-      droneNodes.push({ oscillator: subOsc, gain: subGain, freqIndex: 0, multiplier: 0.5 });
-
-      // Each partial gets a detuned pair (a soft chorus) instead of a single flat tone.
-      frequencies.forEach((frequency, index) => {
-        [-3, 3].forEach((detune) => {
-          const oscillator = audioContext.createOscillator();
-          const gain = audioContext.createGain();
-          oscillator.type = index === 1 ? "triangle" : "sine";
-          oscillator.frequency.value = frequency;
-          oscillator.detune.value = detune;
-          gain.gain.value = index === 0 ? 0.03 : 0.016;
-          oscillator.connect(gain);
-          gain.connect(warmthFilter);
-          oscillator.start();
-          droneNodes.push({ oscillator, gain, freqIndex: index, multiplier: 1 });
-        });
+      aum = new AumSynthesizer({
+        fundamentalFreq: chantModes[currentMode].drone[0],
+        chantDuration: 8,
+        inhaleDuration: 4,
+        holdDuration: 2,
+        reverbMix: 0.65,
+        singingBowlVolume: 0.25,
+        vocalVolume: 0.70,
+        warmth: 0.80
       });
 
-      // A slow LFO breathes the filter open and closed so the drone feels alive, not static.
-      const lfo = audioContext.createOscillator();
-      const lfoGain = audioContext.createGain();
-      lfo.frequency.value = 0.045;
-      lfoGain.gain.value = 110;
-      lfo.connect(lfoGain);
-      lfoGain.connect(warmthFilter.frequency);
-      lfo.start();
-      droneNodes.push({ oscillator: lfo, gain: lfoGain, isLfo: true });
+      aum.init(audioContext, aumGain).then(() => aum.start());
     };
 
-    const retuneDrone = () => {
-      if (!audioContext) return;
-      const now = audioContext.currentTime;
-      const frequencies = chantModes[currentMode].drone;
-      droneNodes.forEach((node) => {
-        if (node.isLfo || node.freqIndex === undefined) return;
-        const target = frequencies[node.freqIndex] * node.multiplier;
-        node.oscillator.frequency.cancelScheduledValues(now);
-        node.oscillator.frequency.setTargetAtTime(target, now, 1.1);
-      });
+    const retuneAum = () => {
+      if (!aum) return;
+      aum.setFundamental(chantModes[currentMode].drone[0]);
     };
 
-    const setDroneActive = (active) => {
-      if (!audioContext || !droneGain) return;
+    // Gayatri and Mrityunjaya have their own genuine recordings, so the
+    // synthesized Aum layer stays fully silent there -- only the bells
+    // and the recording's own effects play. Every other mode keeps the
+    // Aum bowl + chant layer.
+    const setAumActive = (active) => {
+      if (!audioContext || !aumGain) return;
       const now = audioContext.currentTime;
-      droneGain.gain.cancelScheduledValues(now);
-      droneGain.gain.setTargetAtTime(active && droneEnabled ? 0.4 : 0, now, 0.8);
+      const shouldSound = active && droneEnabled && !hasRecording(currentMode);
+      aumGain.gain.cancelScheduledValues(now);
+      aumGain.gain.setTargetAtTime(shouldSound ? 1 : 0, now, 0.8);
     };
 
     const playBell = () => {
@@ -2735,187 +2935,13 @@ AumSynthesizer.prototype.playAumChant = function () {
       clearInterval(bellTimer);
     };
 
-    // ---- Vocal Aum synthesis --------------------------------------------------
-    // Ported from the Aum Resonance instrument: a chanted "A -> U -> M" voice built
-    // from parallel bandpass formant filters over detuned oscillators, rather than
-    // a flat drone tone. This is now the default sound of the chant -- the pad
-    // drone above stays on as ambient support underneath it, not as the lead voice.
-    let vocalGainMaster = null;
-    let vocalReverbSend = null;
-    let activeVocalNodes = [];
-
-    const setupVocalBus = () => {
-      if (!audioContext || vocalGainMaster) return;
-
-      vocalGainMaster = audioContext.createGain();
-      vocalGainMaster.gain.value = 1;
-      vocalGainMaster.connect(audioContext.destination);
-
-      vocalReverbSend = audioContext.createGain();
-      vocalReverbSend.gain.value = 0.5;
-
-      const delayL = audioContext.createDelay(2.0);
-      const delayR = audioContext.createDelay(2.0);
-      const fbL = audioContext.createGain();
-      const fbR = audioContext.createGain();
-      const revFilterL = audioContext.createBiquadFilter();
-      const revFilterR = audioContext.createBiquadFilter();
-
-      delayL.delayTime.value = 0.75;
-      delayR.delayTime.value = 1.15;
-      fbL.gain.value = 0.5;
-      fbR.gain.value = 0.5;
-      revFilterL.type = "lowpass";
-      revFilterL.frequency.value = 550;
-      revFilterR.type = "lowpass";
-      revFilterR.frequency.value = 550;
-
-      vocalReverbSend.connect(delayL);
-      delayL.connect(revFilterL);
-      revFilterL.connect(audioContext.destination);
-      revFilterL.connect(fbL);
-      fbL.connect(delayR);
-
-      vocalReverbSend.connect(delayR);
-      delayR.connect(revFilterR);
-      revFilterR.connect(audioContext.destination);
-      revFilterR.connect(fbR);
-      fbR.connect(delayL);
-    };
-
-    const stopVocalAum = () => {
-      activeVocalNodes.forEach((node) => {
-        try { node.stop(); } catch (error) {}
-      });
-      activeVocalNodes = [];
-    };
-
-    const playVocalAum = (durationSeconds) => {
-      if (!audioContext) return;
-      setupVocalBus();
-
-      const ctx = audioContext;
-      const start = ctx.currentTime;
-      const duration = durationSeconds;
-      const f0 = chantModes[currentMode].drone[0];
-
-      const vocalGain = ctx.createGain();
-      vocalGain.gain.setValueAtTime(0, start);
-      vocalGain.gain.linearRampToValueAtTime(0.85, start + 0.35);
-      vocalGain.gain.setValueAtTime(0.85, start + duration * 0.7);
-      vocalGain.gain.exponentialRampToValueAtTime(0.001, start + duration);
-      vocalGain.connect(vocalGainMaster);
-      vocalGain.connect(vocalReverbSend);
-
-      const osc1 = ctx.createOscillator();
-      const osc2 = ctx.createOscillator();
-      const osc3 = ctx.createOscillator();
-      const subOsc = ctx.createOscillator();
-
-      osc1.type = "sawtooth";
-      osc1.frequency.setValueAtTime(f0, start);
-      osc2.type = "triangle";
-      osc2.frequency.setValueAtTime(f0 * 1.003, start);
-      osc3.type = "triangle";
-      osc3.frequency.setValueAtTime(f0 * 0.997, start);
-      subOsc.type = "sine";
-      subOsc.frequency.setValueAtTime(f0 * 0.5, start);
-
-      const sourceGain = ctx.createGain();
-      const subGain = ctx.createGain();
-      sourceGain.gain.setValueAtTime(0.65, start);
-      subGain.gain.setValueAtTime(0.1, start);
-
-      const vibratoLFO = ctx.createOscillator();
-      const vibratoAmp = ctx.createGain();
-      vibratoLFO.type = "sine";
-      vibratoLFO.frequency.setValueAtTime(4.8, start);
-      vibratoAmp.gain.setValueAtTime(1.8, start);
-      vibratoLFO.connect(vibratoAmp);
-      vibratoAmp.connect(osc1.frequency);
-      vibratoAmp.connect(osc2.frequency);
-      vibratoAmp.connect(osc3.frequency);
-
-      osc1.connect(sourceGain);
-      osc2.connect(sourceGain);
-      osc3.connect(sourceGain);
-      subOsc.connect(subGain);
-
-      const filter1 = ctx.createBiquadFilter();
-      const filter2 = ctx.createBiquadFilter();
-      const lowpass = ctx.createBiquadFilter();
-      filter1.type = "bandpass";
-      filter2.type = "bandpass";
-      lowpass.type = "lowpass";
-
-      const formMix1 = ctx.createGain();
-      const formMix2 = ctx.createGain();
-
-      sourceGain.connect(filter1);
-      sourceGain.connect(filter2);
-      subGain.connect(lowpass);
-      filter1.connect(formMix1);
-      filter2.connect(formMix2);
-      formMix1.connect(lowpass);
-      formMix2.connect(lowpass);
-      lowpass.connect(vocalGain);
-
-      // "A" (Ah): open mouth, bright, chest resonance
-      filter1.frequency.setValueAtTime(650, start);
-      filter1.Q.setValueAtTime(5.5, start);
-      formMix1.gain.setValueAtTime(0.85, start);
-      filter2.frequency.setValueAtTime(1100, start);
-      filter2.Q.setValueAtTime(4.5, start);
-      formMix2.gain.setValueAtTime(0.6, start);
-      lowpass.frequency.setValueAtTime(1600, start);
-      lowpass.Q.setValueAtTime(1.0, start);
-
-      // "A" -> "U" (Oo): mouth rounds, darker
-      const tU = start + duration * 0.35;
-      filter1.frequency.exponentialRampToValueAtTime(380, tU);
-      filter1.Q.linearRampToValueAtTime(4.0, tU);
-      formMix1.gain.linearRampToValueAtTime(0.75, tU);
-      filter2.frequency.exponentialRampToValueAtTime(850, tU);
-      filter2.Q.linearRampToValueAtTime(3.5, tU);
-      formMix2.gain.linearRampToValueAtTime(0.4, tU);
-      lowpass.frequency.exponentialRampToValueAtTime(700, tU);
-
-      // "U" -> "M" (Mm): closed mouth, nasal buzz
-      const tM = start + duration * 0.70;
-      filter1.frequency.exponentialRampToValueAtTime(255, tM);
-      filter1.Q.linearRampToValueAtTime(8.5, tM);
-      formMix1.gain.linearRampToValueAtTime(0.95, tM);
-      filter2.frequency.exponentialRampToValueAtTime(1550, tM);
-      filter2.Q.linearRampToValueAtTime(9.0, tM);
-      formMix2.gain.linearRampToValueAtTime(0.25, tM);
-      lowpass.frequency.exponentialRampToValueAtTime(320, tM);
-
-      const tEnd = start + duration;
-      filter1.frequency.exponentialRampToValueAtTime(230, tEnd);
-      filter2.frequency.exponentialRampToValueAtTime(1400, tEnd);
-      lowpass.frequency.exponentialRampToValueAtTime(220, tEnd);
-
-      osc1.start(start);
-      osc2.start(start);
-      osc3.start(start);
-      subOsc.start(start);
-      vibratoLFO.start(start);
-      osc1.stop(tEnd);
-      osc2.stop(tEnd);
-      osc3.stop(tEnd);
-      subOsc.stop(tEnd);
-      vibratoLFO.stop(tEnd);
-
-      activeVocalNodes = [osc1, osc2, osc3, subOsc, vibratoLFO];
-    };
-
     toggle.addEventListener("click", async () => {
       const isChanting = document.body.classList.contains("chanting");
       if (!isChanting) {
         try {
-          createDrone();
+          createAum();
           await audioContext.resume();
-          setDroneActive(true);
+          setAumActive(true);
           if (hasRecording(currentMode)) {
             syncAudioSourceToMode();
             audio.volume = 0;
@@ -2932,7 +2958,7 @@ AumSynthesizer.prototype.playAumChant = function () {
         }
       } else {
         fadeAudio(0, 700);
-        setDroneActive(false);
+        setAumActive(false);
         document.body.classList.remove("chanting");
         stopMantraRotation();
         stopBellCycle();
@@ -2954,7 +2980,7 @@ AumSynthesizer.prototype.playAumChant = function () {
       droneEnabled = !droneEnabled;
       droneToggle.textContent = droneEnabled ? "Drone On" : "Drone Off";
       droneToggle.setAttribute("aria-pressed", String(droneEnabled));
-      setDroneActive(droneEnabled && document.body.classList.contains("chanting"));
+      setAumActive(droneEnabled && document.body.classList.contains("chanting"));
     });
 
     modeButtons.forEach((button) => {
@@ -2970,9 +2996,10 @@ AumSynthesizer.prototype.playAumChant = function () {
         });
         activeMode.textContent = chantModes[currentMode].label;
 
-        retuneDrone();
+        retuneAum();
 
         const isChanting = document.body.classList.contains("chanting");
+        setAumActive(isChanting);
         const newHasRecording = hasRecording(currentMode);
         const nextSrc = newHasRecording ? chantAudioSources[currentMode] : null;
         const audioChanged = nextSrc !== loadedAudioSrc;
